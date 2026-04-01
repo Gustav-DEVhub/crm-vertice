@@ -1,13 +1,267 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") 
+}
+
+// ─── Enums ───────────────────────────────────────────
+
+enum PropertyMode {
+  SALE
+  RENT
+}
+
+enum PropertyType {
+  APARTMENT
+  HOUSE
+  VILLA
+  STUDIO
+  PENTHOUSE
+  COMMERCIAL
+  LAND
+  GARAGE
+  OFFICE
+}
+
+enum SalePhase {
+  CAPTACION
+  DOCUMENTACION
+  PUBLICACION
+  VISITAS
+  NEGOCIACION
+  RESERVA
+  FIRMA
+  ESCRITURACION
+}
+
+enum RentPhase {
+  CAPTACION
+  DOCUMENTACION
+  PUBLICACION
+  VISITAS
+  NEGOCIACION
+  RESERVA
+  CONTRATO
+}
+
+enum ClientType {
+  OWNER
+  BUYER
+  TENANT
+}
+
+enum ClientStatus {
+  ACTIVE
+  CLOSED
+}
+
+enum CommissionStatus {
+  PENDING
+  PAID
+}
+
+enum ExpDocStatus {
+  PENDING
+  DELIVERED
+  VALIDATED
+}
+
+enum ExternalProfType {
+  PERITO
+  NOTARY
+  GESTOR
+}
+
+// ─── Models ──────────────────────────────────────────
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime   @default(now())
+  auditLogs    AuditLog[]
+}
+
+model Agent {
+  id            String        @id @default(cuid())
+  name          String
+  email         String        @unique
+  phone         String
+  avatarUrl     String?
+  joinDate      DateTime
+  commissionPct Float         @default(0.6)
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  properties    Property[]
+  visits        Visit[]
+  commissions   Commission[]
+  transactions  Transaction[]
+}
+
+model Property {
+  id              String          @id @default(cuid())
+  type            PropertyType
+  mode            PropertyMode
+  address         String
+  city            String
+  price           Float
+  m2              Float
+  rooms           Int
+  baths           Int
+  description     String?
+  commissionPct   Float           @default(0.03)
+  agentId         String?
+  agent           Agent?          @relation(fields: [agentId], references: [id])
+  captureDate     DateTime        @default(now())
+  currentPhase    String          @default("CAPTACION")
+  lastPhaseUpdate DateTime        @default(now())
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  photos          PropertyPhoto[]
+  visits          Visit[]
+  transactions    Transaction[]
+  expedientes     Expediente[]
+  phaseHistory    PhaseHistory[]
+
+  @@index([mode, currentPhase])
+  @@index([agentId])
+}
+
+model PropertyPhoto {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  url        String
+  order      Int      @default(0)
+}
+
+model Client {
+  id          String       @id @default(cuid())
+  name        String
+  phone       String
+  email       String
+  type        ClientType
+  origin      String?
+  budget      Float?
+  preferences String?
+  status      ClientStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  visits      Visit[]
+  buyerTx     Transaction[] @relation("BuyerTransactions")
+  sellerTx    Transaction[] @relation("SellerTransactions")
+
+  @@index([status])
+}
+
+model Visit {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  clientId   String
+  client     Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  agentId    String
+  agent      Agent    @relation(fields: [agentId], references: [id])
+  date       DateTime
+  result     String
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  @@index([propertyId])
+  @@index([agentId, date])
+}
+
+model Transaction {
+  id             String       @id @default(cuid())
+  propertyId     String
+  property       Property     @relation(fields: [propertyId], references: [id])
+  buyerId        String
+  buyer          Client       @relation("BuyerTransactions", fields: [buyerId], references: [id])
+  sellerId       String
+  seller         Client       @relation("SellerTransactions", fields: [sellerId], references: [id])
+  agentId        String
+  agent          Agent        @relation(fields: [agentId], references: [id])
+  externalProfId String?
+  externalProf   ExternalProf? @relation(fields: [externalProfId], references: [id])
+  closeDate      DateTime
+  finalPrice     Float
+  notarialDate   DateTime?
+  createdAt      DateTime     @default(now())
+  commissions    Commission[]
+  expedientes    Expediente[]
+}
+
+model Commission {
+  id            String           @id @default(cuid())
+  transactionId String
+  transaction   Transaction      @relation(fields: [transactionId], references: [id])
+  agentId       String
+  agent         Agent            @relation(fields: [agentId], references: [id])
+  totalAmount   Float
+  agentAmount   Float
+  agencyAmount  Float
+  status        CommissionStatus @default(PENDING)
+  paidAt        DateTime?
+  createdAt     DateTime         @default(now())
+}
+
+model Expediente {
+  id            String      @id @default(cuid())
+  propertyId    String
+  property      Property    @relation(fields: [propertyId], references: [id])
+  transactionId String?
+  transaction   Transaction? @relation(fields: [transactionId], references: [id])
+  status        String      @default("ABIERTO")
+  createdAt     DateTime    @default(now())
+  documents     ExpDoc[]
+}
+
+model ExpDoc {
+  id           String       @id @default(cuid())
+  expedienteId String
+  expediente   Expediente   @relation(fields: [expedienteId], references: [id], onDelete: Cascade)
+  phase        String
+  name         String
+  status       ExpDocStatus @default(PENDING)
+  createdAt    DateTime     @default(now())
+}
+
+model ExternalProf {
+  id           String           @id @default(cuid())
+  type         ExternalProfType
+  name         String
+  phone        String
+  email        String
+  createdAt    DateTime         @default(now())
+  transactions Transaction[]
+}
+
+model PhaseHistory {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  phase      String
+  changedAt  DateTime @default(now())
+  changedBy  String
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String
+  oldValue  Json?
+  newValue  Json?
+  ip        String
+  userAgent String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entity, entityId])
 }
